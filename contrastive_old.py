@@ -41,7 +41,7 @@ class Contrastive(nn.Module):
         self.kemb = nn.Embedding(5,256)
 
         self.net1 = nn.Sequential(nn.Linear(1024+1024+256, 1024), nn.Dropout(0.2), nn.LeakyReLU(), nn.Linear(1024,512), nn.LeakyReLU(), nn.Linear(512,512), nn.LeakyReLU(), nn.Linear(512, 256))
-        self.net2 = nn.Sequential(nn.Linear(1024, 1024), nn.Dropout(0.2), nn.LeakyReLU(), nn.Linear(1024,512), nn.LeakyReLU(), nn.Linear(512,512), nn.LeakyReLU(), nn.Linear(512, 256))
+        self.net2 = nn.Sequential(nn.Linear(1024+256, 1024), nn.Dropout(0.2), nn.LeakyReLU(), nn.Linear(1024,512), nn.LeakyReLU(), nn.Linear(512,512), nn.LeakyReLU(), nn.Linear(512, 256))
 
     #Shaped (Tx2), (Tx2), (Tx2).  Classify the s_pos and a_pos with next-vals as positive, classify s_pos with s_neg as negatives.  
     def forward(self, s, a, s_n):
@@ -61,7 +61,7 @@ class Contrastive(nn.Module):
         kfeat = self.kemb(torch.Tensor([k]*s.shape[0]).long().cuda())
 
         s = self.net1(torch.cat([self.gauss_feat(s), self.gauss_feat(a), kfeat],dim=1))
-        s_n = self.net2(self.gauss_feat(s_n))
+        s_n = self.net2(torch.cat([self.gauss_feat(s_n),kfeat],dim=1))
 
         return self.forward(s, a, s_n)
 
@@ -73,7 +73,7 @@ class Contrastive(nn.Module):
         kfeat = self.kemb(torch.Tensor([k]*s.shape[0]).long().cuda())
 
         s = self.net1(torch.cat([self.gauss_feat(s), self.gauss_feat(a), kfeat], dim=1))
-        spos = self.net2(self.gauss_feat(spos))
+        spos = self.net2(torch.cat([self.gauss_feat(spos),kfeat],dim=1))
 
 
         return self.forward(s,a,spos)
@@ -89,7 +89,7 @@ class Contrastive(nn.Module):
         kfeat = self.kemb(torch.Tensor([k]*s.shape[0]).long().cuda())
 
         s = self.net1(torch.cat([self.gauss_feat(s), self.gauss_feat(a), kfeat],dim=1))
-        sneg = self.net2(self.gauss_feat(sneg))
+        sneg = self.net2(torch.cat([self.gauss_feat(sneg),kfeat],dim=1))
 
         s_c, a_c, sn_c = make_prod(s, a, sneg)
 

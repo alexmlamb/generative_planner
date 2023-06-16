@@ -119,9 +119,9 @@ if __name__ == "__main__":
 
             test_err = torch.Tensor([[0.2, 0.2, 0.0, 0.0, 0.22, 0.2], [0.5, 0.5, 0.2, 0.0, 0.71, 0.5]]).cuda()
 
-            print('neg-cross', score_net.forward_enc(test_neg[:,0:2], test_neg[:,2:4], test_neg[:,4:6],3)[1])
-            print('pos-cross', score_net.forward_enc(test_pos[:,0:2], test_pos[:,2:4], test_pos[:,4:6],3)[1])
-            print('err-cross', score_net.forward_enc(test_err[:,0:2], test_err[:,2:4], test_err[:,4:6],3)[1])
+            print('neg-cross', score_net.forward_enc(test_neg[:,0:2], test_neg[:,2:4], test_neg[:,4:6],1)[1])
+            print('pos-cross', score_net.forward_enc(test_pos[:,0:2], test_pos[:,2:4], test_pos[:,4:6],1)[1])
+            print('err-cross', score_net.forward_enc(test_err[:,0:2], test_err[:,2:4], test_err[:,4:6],1)[1])
 
 
 
