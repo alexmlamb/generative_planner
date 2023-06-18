@@ -48,10 +48,12 @@ opt = torch.optim.Adam(list(score_net.parameters()), lr=0.0001)
 
 if __name__ == "__main__":
 
+    import time
+    t0 = time.time()
 
     dataset = pickle.load(open('data/dataset.p', 'rb'))
     n = dataset['X'].shape[0]
-    slen = 4
+    slen = 3
     bs = 256
     print('Num samples', dataset['X'].shape[0])       
     assert len(dataset['X'].shape) == 4
@@ -92,6 +94,8 @@ if __name__ == "__main__":
         opt.step()
 
         if j % 500 == 0:
+            print('time', time.time() - t0)
+            t0 = time.time()
             print('loss', j, sum(contrastive_loss)/len(contrastive_loss))
 
             contrastive_loss = []
@@ -123,6 +127,6 @@ if __name__ == "__main__":
             print('pos-cross', score_net.forward_enc(test_pos[:,0:2], test_pos[:,2:4], test_pos[:,4:6],1)[1])
             print('err-cross', score_net.forward_enc(test_err[:,0:2], test_err[:,2:4], test_err[:,4:6],1)[1])
 
-
+            torch.save(score_net, 'contrastive.pt')
 
 

@@ -100,7 +100,7 @@ class Contrastive(nn.Module):
 
         assert s_seq.shape[0] == s_neg.shape[0]
 
-        k = random.randint(1,3)
+        k = random.randint(1,2)
 
         s_last = s_seq[:-k]
         a_last = a_seq[:-k]
