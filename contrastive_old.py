@@ -100,19 +100,19 @@ class Contrastive(nn.Module):
 
         assert s_seq.shape[0] == s_neg.shape[0]
 
-        k = random.randint(1,2)
+        k = random.randint(0,2)
 
-        s_last = s_seq[:-k]
-        a_last = a_seq[:-k]
+        if k > 0:
+            s_last = s_seq[:-k]
+            a_last = a_seq[:-k]
+        else:
+            s_last = s_seq
+            a_last = a_seq
+
         s_pos = s_seq[k:]
         s_neg = s_neg[k:] #not needed, just to make sizes match   
 
         s_last_neg = s_last * 1.0
-
-        if False and random.uniform(0,1) < 0.5:
-            noise_scale = random.uniform(0.01,0.2)
-            s_neg += (torch.randn_like(s_neg) * noise_scale).round(decimals=2)
-            s_last_neg += (torch.randn_like(s_last_neg) * noise_scale).round(decimals=2)
 
         pos_logits, _ = self.pos_contrastive_loss(s_last, a_last, s_pos, k)
         neg_logits, _ = self.neg_contrastive_loss(s_last_neg, a_last, s_neg, k)
