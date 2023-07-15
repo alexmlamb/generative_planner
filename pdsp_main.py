@@ -26,6 +26,46 @@ from viz_utils import viz_plan
 
 amax = 0.2
 
+
+class StochasticPolicy(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        h_dim = 512*4 + 512
+        self.a_feat = nn.Linear(2, 1024)
+
+        self.prior_net = nn.Sequential(nn.Linear(h_dim, 1024), nn.LeakyReLU(), nn.Linear(1024, 128))
+        self.posterior_net = nn.Sequential(nn.Linear(h_dim + 512*2, 1024), nn.LeakyReLU(), nn.Linear(1024, 128))
+        self.decoder_net = nn.Sequential(nn.Linear(h_dim, 1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,2))
+
+    def mode(self, h):
+        #pr_h = self.prior_net(h)
+        #mu,std = torch.chunk(pr_h,2,dim=1)
+        #std = torch.exp(std)
+        out = self.decoder_net(torch.cat([h], dim=1))
+
+        return out
+
+    def train_act(self, h, a):
+
+        #af = self.a_feat(a)
+        #post_h = self.posterior_net(torch.cat([h, af*0.0], dim=1))
+        #h_mu, h_std = torch.chunk(post_h, 2, dim=1)
+        #h_std = torch.exp(h_std)
+
+        #mu_prior = torch.zeros_like(h_mu)
+        #std_prior = torch.ones_like(h_std)
+        #prior = torch.distributions.normal.Normal(mu_prior, std_prior)
+        #posterior = torch.distributions.normal.Normal(h_mu, h_std)
+        #kl_loss = torch.distributions.kl_divergence(posterior, prior).sum(dim=-1).mean() * 1e-3
+        #z_post = posterior.rsample()
+
+        out = self.decoder_net(torch.cat([h], dim=1))
+        kl_loss = 0.0
+
+        return out, kl_loss
+
+
 class PolicyValueNet(nn.Module):
 
     def __init__(self):
@@ -58,7 +98,7 @@ class Planner(nn.Module):
         #self.pvn = nn.Sequential(nn.Linear(512*4 + 512, 1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024, 2))
         self.koptflag = nn.Embedding(2, 512)
 
-        self.pvn = PolicyValueNet().cuda()
+        self.pvn = StochasticPolicy().cuda() #PolicyValueNet().cuda()
 
         self.lfn = nn.MSELoss(reduction='none')
 
@@ -105,8 +145,8 @@ class Planner(nn.Module):
 
         #train_score += self.score.forward_enc(slast, alst, sg, 0)[1]*0.25
         
-        train_score += torch.exp(-100.0 * torch.abs(slast - sg).mean(dim=1)) * 0.25
-        train_score += self.score.forward_enc(slast, alst, sg, 1)[1]*0.25
+        train_score += torch.exp(-100.0 * torch.abs(slast - sg).mean(dim=1)) * 0.0
+        train_score += self.score.forward_enc(slast, alst, sg, 1)[1]*0.50
         train_score += self.score.forward_enc(slast, alst, sg, 2)[1]*0.50
 
         eval_score += self.score.forward_enc(slast, alst, sg, 2)[1] #michael henaff, yann lecun.  Uncertainty-based penalization of model-based RL.  
@@ -146,8 +186,9 @@ class Planner(nn.Module):
             else:
                 sg_use = sg
 
-            a,_ = self.pvn(torch.cat([self.makefeat(s,sg_use), kemb], dim=1))
+            a = self.pvn.mode(torch.cat([self.makefeat(s,sg_use), kemb], dim=1))
             s = dyn(s, a)*1.0
+            
             slst.append(s.unsqueeze(0))
             alst.append(a.unsqueeze(0))
 
@@ -181,10 +222,10 @@ class Planner(nn.Module):
             sg_targ = sg
             noise_level = random.uniform(0.1, 0.2)
 
-        OT_a0 = torch.clamp(self.pvn(torch.cat([self.makefeat(s0,sg), kemb], dim=1))[0],-1*amax,amax)
+        OT_a0 = torch.clamp(self.pvn.mode(torch.cat([self.makefeat(s0,sg), kemb], dim=1)),-1*amax,amax)
         OT_s1 = dyn(s0, OT_a0)
 
-        RT_a0 = torch.clamp(self.pvn(torch.cat([self.makefeat(s0,sg_targ), kemb], dim=1))[0]+torch.randn_like(OT_a0)*0.1, -0.2, 0.2)
+        RT_a0 = torch.clamp(self.pvn.mode(torch.cat([self.makefeat(s0,sg_targ), kemb], dim=1))+torch.randn_like(OT_a0)*0.1, -0.2, 0.2)
         RT_s1 = dyn(s0, RT_a0)
 
 
@@ -232,13 +273,14 @@ class Planner(nn.Module):
         a0_targ = sel_RT * RT_a0 + (1-sel_RT) * OT_a0
         sk_targ = sel_RT * RT_slst[-1] + (1-sel_RT) * OT_slst[-1]
 
-        a0_pred, v_pred = self.pvn(torch.cat([self.makefeat(s0.detach(),sg.detach()), kemb], dim=1)) #Better to use sg (goal) or what we reached (sk_targ).  
+        a0_pred, kl_loss = self.pvn.train_act(torch.cat([self.makefeat(s0.detach(),sg.detach()), kemb], dim=1), a0_targ) #Better to use sg (goal) or what we reached (sk_targ).  
             
         l = self.lfn(a0_pred, a0_targ.detach()).mean()
+        l += kl_loss
 
         #l += self.lfn(v_pred, OT_score_weighted.permute(1,0).detach()).mean()
 
-        return l, a0_pred, torch.cat([s0.unsqueeze(0), OT_slst], dim=0), OT_score, v_pred
+        return l, a0_pred, torch.cat([s0.unsqueeze(0), OT_slst], dim=0), OT_score
 
     def onestep_loss(self, st, at, stk):
 
@@ -273,7 +315,7 @@ class Planner(nn.Module):
         k = torch.Tensor([1]*st.shape[0]).long().cuda()
         kemb = self.koptflag(k)
 
-        a0_pred = self.pvn(torch.cat([feat,kemb],dim=1))[0]
+        a0_pred = self.pvn.mode(torch.cat([feat,kemb],dim=1))
 
         l = self.lfn(a0_pred, at.detach()).mean()
 
@@ -317,10 +359,20 @@ if __name__ == "__main__":
             #t0 = time.time()
             s0 = st[:,0]
             idx = torch.randperm(s0.shape[0])
-            sk = st[:,-1][idx]#st[:,ktr]
+            sk = st[:,-1][idx]
             sk_pre = st[:,-2][idx]
+
+            arand = torch.clamp(torch.randn_like(s0)*0.1, -0.2,0.2)
+            s0_n = dyn(s0, arand)
+
+            arand = torch.clamp(torch.randn_like(s0)*0.1, -0.2,0.2)
+            sk_n = dyn(sk, arand)
+
+            arand = torch.clamp(torch.randn_like(s0)*0.1, -0.2,0.2)
+            sk_pre_n = dyn(sk_pre, arand)
+
             a0 = a[:,0]
-            l,a0pred,splan, plan_score, vpred = plan.multistep(s0,a0,sk,sk_pre,ktr,dyn)
+            l,a0pred,splan, plan_score = plan.multistep(s0,a0,sk,sk_pre,ktr,dyn)
             #print(time.time() - t0, 'total forward time')
 
             loss_lst.append(l.item())

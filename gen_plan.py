@@ -1,14 +1,10 @@
 
-
 '''
-First get a pre-trained dynamics model.  
-Then start by training 1-step inverse model.  
-
-Then do a k-step inverse model using traj from dataset.  
-
-1 - Start collecting s,a data.  
-2 - Train 1-step inverse model p(a | s[t], s[t+1]) using fourier features.  
-
+Setup:
+  -Trajectory synthesizer: (s0,sg) --> s[0:k], a[0:k].  
+  -Synthesize roll-in for sg, one special action, then roll-out for sg.  
+  -Use scoring thing on whole sequence.  
+  -With better rollout update synthesizer and policy.  
 
 '''
 
@@ -26,46 +22,49 @@ from viz_utils import viz_plan
 
 amax = 0.2
 
+
+class StochasticPolicy(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        h_dim = 512*4 + 512
+        self.a_feat = nn.Linear(2, 1024)
+
+        self.prior_net = nn.Sequential(nn.Linear(h_dim, 1024), nn.LeakyReLU(), nn.Linear(1024, 128))
+        self.posterior_net = nn.Sequential(nn.Linear(h_dim + 512*2, 1024), nn.LeakyReLU(), nn.Linear(1024, 128))
+        self.decoder_net = nn.Sequential(nn.Linear(h_dim, 1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,2))
+
+    def mode(self, h):
+        out = self.decoder_net(torch.cat([h], dim=1))
+
+        return out
+
+    def train_act(self, h, a):
+
+        out = self.decoder_net(torch.cat([h], dim=1))
+        kl_loss = 0.0
+
+        return out, kl_loss
+
+
 class PolicyValueNet(nn.Module):
 
     def __init__(self):
         super().__init__()
 
-        #(s,g) --> a
-        self.policy_net = nn.Sequential(nn.Linear(512*4, 1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,2)).cuda() 
+        self.policy_net = nn.Sequential(nn.Linear(512*4 + 512, 1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU())
+        self.value_net = nn.Sequential(nn.Linear(512*4 + 512, 1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU())
 
-        #(s,g) --> 1
-        self.value_net = nn.Sequential(nn.Linear(512*4, 1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,1)).cuda()
+        self.policy_head = nn.Linear(1024,2)
+        self.value_head = nn.Linear(1024,15)
 
-        #(s,g,a) --> 1
-        self.q_net = nn.Sequential(nn.Linear(512*6, 1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,1)).cuda()
 
-        self.gauss_feat = GaussianFourierProjectionTime()
+    def forward(self, h):
 
-    def makefeat2(self,s):
-        bs = s.shape[0]
-        inp_flat = s.reshape((bs*s.shape[1]))
-        feat = self.gauss_feat(inp_flat).reshape((bs,-1))
+        p = self.policy_head(self.policy_net(h))
+        v = self.value_head(self.value_net(h))
 
-        return feat
-
-    def value(self, st, sg):
-        st = self.makefeat2(st)
-        sg = self.makefeat2(sg)
-        feat = torch.cat([st,sg],dim=1)
-
-        v = self.value_net(feat)
-
-        return v
-
-    def qval(self, st, at, sg):
-        st = self.makefeat2(st)
-        at = self.makefeat2(at)
-        sg = self.makefeat2(sg)
-        feat = torch.cat([st,at,sg], dim=1)
-        q = self.q_net(feat)
-        return q
-
+        return p,v
 
 
 class Planner(nn.Module):
@@ -75,18 +74,19 @@ class Planner(nn.Module):
 
         #self.trans = nn.Sequential(nn.Linear(2+2, 1024), nn.Dropout(0.5), nn.LeakyReLU(), nn.Linear(1024,1024), nn.Dropout(0.5), nn.LeakyReLU(), nn.Linear(1024,1024), nn.Dropout(0.5), nn.LeakyReLU(), nn.Linear(1024,4))
 
+        self.gauss_feat = GaussianFourierProjectionTime().cuda()
 
         #self.pvn = nn.Sequential(nn.Linear(512*4 + 512, 1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024,1024), nn.LeakyReLU(), nn.Linear(1024, 2))
         self.koptflag = nn.Embedding(2, 512)
 
-        self.pvn = PolicyValueNet().cuda()
+        self.pvn = StochasticPolicy().cuda()
 
         self.lfn = nn.MSELoss(reduction='none')
 
-    def makefeat(self,s):
+    def makefeat(self,st,stk):
 
-        bs = s.shape[0]
-        inp = s#torch.cat([st,stk],dim=1)
+        bs = st.shape[0]
+        inp = torch.cat([st,stk],dim=1)
         inp_flat = inp.reshape((inp.shape[0]*inp.shape[1]))
         feat = self.gauss_feat(inp_flat).reshape((bs,-1))
 
@@ -126,8 +126,8 @@ class Planner(nn.Module):
 
         #train_score += self.score.forward_enc(slast, alst, sg, 0)[1]*0.25
         
-        train_score += torch.exp(-100.0 * torch.abs(slast - sg).mean(dim=1)) * 0.25
-        train_score += self.score.forward_enc(slast, alst, sg, 1)[1]*0.25
+        train_score += torch.exp(-100.0 * torch.abs(slast - sg).mean(dim=1)) * 0.0
+        train_score += self.score.forward_enc(slast, alst, sg, 1)[1]*0.50
         train_score += self.score.forward_enc(slast, alst, sg, 2)[1]*0.50
 
         eval_score += self.score.forward_enc(slast, alst, sg, 2)[1] #michael henaff, yann lecun.  Uncertainty-based penalization of model-based RL.  
@@ -167,8 +167,9 @@ class Planner(nn.Module):
             else:
                 sg_use = sg
 
-            a,_ = self.pvn(torch.cat([self.makefeat(s,sg_use), kemb], dim=1))
+            a = self.pvn.mode(torch.cat([self.makefeat(s,sg_use), kemb], dim=1))
             s = dyn(s, a)*1.0
+            
             slst.append(s.unsqueeze(0))
             alst.append(a.unsqueeze(0))
 
@@ -202,10 +203,10 @@ class Planner(nn.Module):
             sg_targ = sg
             noise_level = random.uniform(0.1, 0.2)
 
-        OT_a0 = torch.clamp(self.pvn(torch.cat([self.makefeat(s0,sg), kemb], dim=1))[0],-1*amax,amax)
+        OT_a0 = torch.clamp(self.pvn.mode(torch.cat([self.makefeat(s0,sg), kemb], dim=1)),-1*amax,amax)
         OT_s1 = dyn(s0, OT_a0)
 
-        RT_a0 = torch.clamp(self.pvn(torch.cat([self.makefeat(s0,sg_targ), kemb], dim=1))[0]+torch.randn_like(OT_a0)*0.1, -0.2, 0.2)
+        RT_a0 = torch.clamp(self.pvn.mode(torch.cat([self.makefeat(s0,sg_targ), kemb], dim=1))+torch.randn_like(OT_a0)*0.1, -0.2, 0.2)
         RT_s1 = dyn(s0, RT_a0)
 
 
@@ -216,6 +217,10 @@ class Planner(nn.Module):
         T_sg_targ = torch.cat([sg_targ, sg], dim=0)
 
         T_slst, T_alst = self.simulate(T_s1, T_sg, T_sg_targ, dyn, ktr-1)
+
+        print("shapes", T_slst.shape, T_alst.shape)
+
+        raise Exception()
 
         RT_slst, OT_slst = torch.chunk(T_slst, 2, dim=1)
         RT_alst, OT_alst = torch.chunk(T_alst, 2, dim=1)
@@ -253,13 +258,14 @@ class Planner(nn.Module):
         a0_targ = sel_RT * RT_a0 + (1-sel_RT) * OT_a0
         sk_targ = sel_RT * RT_slst[-1] + (1-sel_RT) * OT_slst[-1]
 
-        a0_pred, v_pred = self.pvn(torch.cat([self.makefeat(s0.detach(),sg.detach()), kemb], dim=1)) #Better to use sg (goal) or what we reached (sk_targ).  
+        a0_pred, kl_loss = self.pvn.train_act(torch.cat([self.makefeat(s0.detach(),sg.detach()), kemb], dim=1), a0_targ) #Better to use sg (goal) or what we reached (sk_targ).  
             
         l = self.lfn(a0_pred, a0_targ.detach()).mean()
+        l += kl_loss
 
         #l += self.lfn(v_pred, OT_score_weighted.permute(1,0).detach()).mean()
 
-        return l, a0_pred, torch.cat([s0.unsqueeze(0), OT_slst], dim=0), OT_score, v_pred
+        return l, a0_pred, torch.cat([s0.unsqueeze(0), OT_slst], dim=0), OT_score
 
     def onestep_loss(self, st, at, stk):
 
@@ -286,79 +292,23 @@ class Planner(nn.Module):
 
         return l
 
-    def cguard(self, st, at, sn):
-        c = self.score.forward_enc(st, at, sn, 1)[1]
-        c = c.unsqueeze(1)
-        return c
-
-    def reward(self, st, at, sg):
-        r = 0.0
-        r += torch.exp(-100.0 * torch.abs(st - sg).mean(dim=1)) * 0.0
-        r += self.score.forward_enc(st, at, sg, 1)[1]*0.5
-        r += self.score.forward_enc(st, at, sg, 2)[1]*0.5
-        r = r.unsqueeze(1)
-        return r
-
-    def eval_value(self, sg):
-        #sg is (1x2)
-        s0 = torch.rand((2048,2)).cuda()
-        s0 = torch.cat([s0, sg], dim=0)
-        sg = sg.repeat(2048+1,1)
-
-        vals = self.pvn.value(s0,sg)
-
-        opt_val = vals.argmax(dim=0)
-        opt_s = s0[opt_val]
-
-        return vals.cpu().data, s0.cpu().data, sg[0:1].cpu().data, opt_s.cpu().data
-
-    def loss(self,st,sg):
+    def loss(self,st,at,stk):
         bs = st.shape[0]
-        N = 2
-        l = 0.0
-        mse = nn.MSELoss()
 
-        #First, estimate Q(s,a,g) := R(s,a,g).  
-        #Get set of random actions (bs,N,2)
-        #Make (s,g) repeat 
+        feat = self.makefeat(st,stk)
 
-        k = torch.randint(1,15,size=(bs,1)).repeat(1,N).cuda()
-        a = torch.clamp(torch.randn(bs,N,2)*0.1, -0.2, 0.2).cuda()
-        a[:,0:1,:] *= 0.0
+        k = torch.Tensor([1]*st.shape[0]).long().cuda()
+        kemb = self.koptflag(k)
 
-        st_rep = st.unsqueeze(1).repeat(1,N,1).cuda()
-        sg_rep = sg.unsqueeze(1).repeat(1,N,1).cuda()
-        
-        st_rep = st_rep.reshape((bs*N,-1))
-        a_rep = a.reshape((bs*N,-1))
-        sg_rep = sg_rep.reshape((bs*N,-1))
+        a0_pred = self.pvn.mode(torch.cat([feat,kemb],dim=1))
 
-        Q_val = self.pvn.qval(st_rep, a_rep, sg_rep)
-        r = self.reward(st_rep, a_rep, sg_rep)
-        
-        sn_rep = self.dyn(st_rep, a_rep)
-        QV_targ = self.pvn.value(sn_rep,sg_rep)
+        l = self.lfn(a0_pred, at.detach()).mean()
 
-        Q_targ = r + (0.99 * QV_targ)
-        cg = self.cguard(st_rep, a_rep, sn_rep)
-        Q_targ *= cg * torch.gt(cg, 0.1).float()
 
-        l += mse(Q_val, Q_targ.detach())
-
-        #Now estimate V(s,g) := max_a Q(s,a,g)
-        Q_val = Q_val.reshape((bs,N,1))
-        maxQ = Q_val.max(dim=1).values.detach()
-
-        V = self.pvn.value(st,sg) #estimate at k
-        l += mse(V, maxQ)
-
-        return l
+        return l, a0_pred, [st,stk], None, None
 
 if __name__ == "__main__":
 
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
 
     dyn = torch.load('dyn.pt').cuda() #takes sl, al and returns sn
     score = torch.load('contrastive.pt').cuda()  #takes sl,al,sn and returns score
@@ -373,7 +323,6 @@ if __name__ == "__main__":
     plan.score = score
     plan.dyn = dyn
 
-
     loss_lst = []
     score_lst = []
     score_approx_lst = []
@@ -383,34 +332,60 @@ if __name__ == "__main__":
         datak = 32
         st, a = sample_batch(X, A, ast, est, 128, datak) #bs x pos x 2
 
-        if True:
+        ktr = random.choice([1,15])#random.randint(1,31)
+
+        if ktr == 1:
+            #1-step problem
+            s0 = st[:,0]
+            sk = st[:,1]
+            a0 = a[:,0]
+            l,a0pred,splan, plan_score, _ = plan.loss(s0,a0,sk)
+        else:
+            #t0 = time.time()
             s0 = st[:,0]
             idx = torch.randperm(s0.shape[0])
             sk = st[:,-1][idx]
             sk_pre = st[:,-2][idx]
-            a0 = a[:,0]
 
-            l = plan.loss(s0,sk)
+            arand = torch.clamp(torch.randn_like(s0)*0.1, -0.2,0.2)
+            s0_n = dyn(s0, arand)
+
+            arand = torch.clamp(torch.randn_like(s0)*0.1, -0.2,0.2)
+            sk_n = dyn(sk, arand)
+
+            arand = torch.clamp(torch.randn_like(s0)*0.1, -0.2,0.2)
+            sk_pre_n = dyn(sk_pre, arand)
+
+            a0 = a[:,0]
+            l,a0pred,splan, plan_score = plan.multistep(s0,a0,sk,sk_pre,ktr,dyn)
+            #print(time.time() - t0, 'total forward time')
 
             loss_lst.append(l.item())
+
+        if plan_score is not None:
+            score_lst.append(plan_score[-1].mean().item())
+            score_approx_lst.append(torch.gt(plan_score[-1], 0.01).float().mean().item())
 
         l.backward()
         opt.step()
         opt.zero_grad()
 
+
         if j % 2000 == 0:
-            print(j, sum(loss_lst)/len(loss_lst))
+            if len(score_lst)>0:
+                print(j, sum(loss_lst)/len(loss_lst))
+                print("score-average", sum(score_lst)/len(score_lst))
+                print("score-approx-average", sum(score_approx_lst)/len(score_approx_lst))
+            score_lst = []
+            score_approx_lst = []
             loss_lst = []
-
-            vals, s0, sg, opt_s = plan.eval_value(sk[0:1].cuda())
-            plt.scatter(s0[:,0], s0[:,1], c=vals, cmap='inferno')
-            plt.savefig('results_val/vals.png')
-            plt.clf()
-            print('v min max', vals.min(), vals.max())        
-            print('sg, opt_s', sg, opt_s)
+            print(ktr)
+            print(s0[0],sk[0],a0pred[0])
 
 
-
-
+            if ktr != 1:
+                viz_plan(s0,sk,splan,plan_score,0,'main')
+                worst_ind = plan_score[-1].argmin()
+                viz_plan(s0,sk,splan,plan_score,worst_ind,'worst')
 
 
