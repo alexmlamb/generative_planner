@@ -1,4 +1,18 @@
 '''
+
+todos:
+  -Add forward model in metric space (sg(m[t]), a[t]) --> sg(m[t+1]).  
+  -Add probe m[t] --> s[t].  
+  -Save metric-forward model.  
+  -Ensure encoder to map from s into metric space.  
+
+
+
+
+
+
+
+
 Algorithm: 
 
     -Files each with train method and a class: 
@@ -83,11 +97,15 @@ if __name__ == "__main__":
         s_neg = torch.cat(s_neg,dim=1)
 
         loss = 0.0
-    
+ 
+   
         closs = score_net.loss(s_seq, a_seq, s_neg)
         contrastive_loss.append(closs.item())
 
         loss += closs
+
+        #loss += score_net.forward_loss(s_seq, a_seq)
+        #loss += score_net.probe_loss(s_seq)
 
         opt.zero_grad()
         loss.backward()
@@ -119,9 +137,9 @@ if __name__ == "__main__":
         if ctype=='v1' and j % 500 == 0:
             test_neg = torch.Tensor([[0.45, 0.2, 0.2, 0.0, 0.65, 0.2], [0.45, 0.2, 0.07, 0.0, 0.52, 0.2], [0.45, 0.2, 0.06, 0.0, 0.51, 0.2], [0.45, 0.2, 0.1, 0.0, 0.55, 0.2], [0.45, 0.2, 0.15, 0.0, 0.52, 0.2]]).cuda()
 
-            test_pos = torch.Tensor([[0.45, 0.2, 0.2, 0.0, 0.49, 0.2], [0.48, 0.1, 0.1, 0.0, 0.49, 0.1], [0.1, 0.1, 0.1, 0.0, 0.4, 0.1]]).cuda()
+            test_pos = torch.Tensor([[0.45, 0.2, 0.2, 0.0, 0.49, 0.2], [0.48, 0.1, 0.1, 0.0, 0.49, 0.1], [0.1, 0.1, 0.1, 0.0, 0.2, 0.1]]).cuda()
 
-            test_err = torch.Tensor([[0.2, 0.2, 0.0, 0.0, 0.22, 0.2], [0.5, 0.5, 0.2, 0.0, 0.71, 0.5]]).cuda()
+            test_err = torch.Tensor([[0.2, 0.2, 0.0, 0.0, 0.22, 0.2], [0.5, 0.5, 0.2, 0.0, 0.71, 0.5], [0.1, 0.1, 0.05, 0.0, 0.2, 0.1], [0.1, 0.1, 0.2, 0.0, 0.4, 0.1]]).cuda()
 
             print('neg-cross', score_net.forward_enc(test_neg[:,0:2], test_neg[:,2:4], test_neg[:,4:6],1)[1])
             print('pos-cross', score_net.forward_enc(test_pos[:,0:2], test_pos[:,2:4], test_pos[:,4:6],1)[1])
