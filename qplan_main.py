@@ -42,6 +42,15 @@ class PolicyValueNet(nn.Module):
 
         self.gauss_feat = GaussianFourierProjectionTime()
 
+    def policy(self, st, sg):
+        st = self.makefeat2(st)
+        sg = self.makefeat2(sg)
+        feat = torch.cat([st,sg],dim=1)
+
+        p = self.policy_net(feat)
+
+        return p
+
     def makefeat2(self,s):
         bs = s.shape[0]
         inp_flat = s.reshape((bs*s.shape[1]))
@@ -293,9 +302,13 @@ class Planner(nn.Module):
 
     def reward(self, st, at, sg):
         r = 0.0
-        r += torch.exp(-100.0 * torch.abs(st - sg).mean(dim=1)) * 0.0
-        r += self.score.forward_enc(st, at, sg, 1)[1]*0.5
-        r += self.score.forward_enc(st, at, sg, 2)[1]*0.5
+
+        if False:
+            r += self.score.self_score(st, sg)[1]*1.0
+        else:
+            r += torch.exp(-100.0 * torch.abs(st - sg).mean(dim=1)) * 0.0
+            r += self.score.forward_enc(st, at, sg, 1)[1]*0.5
+            r += self.score.forward_enc(st, at, sg, 2)[1]*0.5
         r = r.unsqueeze(1)
         return r
 
@@ -310,11 +323,13 @@ class Planner(nn.Module):
         opt_val = vals.argmax(dim=0)
         opt_s = s0[opt_val]
 
-        return vals.cpu().data, s0.cpu().data, sg[0:1].cpu().data, opt_s.cpu().data
+        policy = self.pvn.policy(s0,sg)
+
+        return vals.cpu().data, s0.cpu().data, sg[0:1].cpu().data, opt_s.cpu().data, policy.cpu().data
 
     def loss(self,st,sg):
         bs = st.shape[0]
-        N = 2
+        N = 5
         l = 0.0
         mse = nn.MSELoss()
 
@@ -323,7 +338,13 @@ class Planner(nn.Module):
         #Make (s,g) repeat 
 
         k = torch.randint(1,15,size=(bs,1)).repeat(1,N).cuda()
-        a = torch.clamp(torch.randn(bs,N,2)*0.1, -0.2, 0.2).cuda()
+
+        policy = self.pvn.policy(st, sg).unsqueeze(1)
+
+        a = torch.clamp(torch.randn(bs,N-1,2)*0.1, -0.2, 0.2).cuda()
+        a = torch.cat([a,policy],dim=1)
+
+
         a[:,0:1,:] *= 0.0
 
         st_rep = st.unsqueeze(1).repeat(1,N,1).cuda()
@@ -339,15 +360,20 @@ class Planner(nn.Module):
         sn_rep = self.dyn(st_rep, a_rep)
         QV_targ = self.pvn.value(sn_rep,sg_rep)
 
-        Q_targ = r + (0.99 * QV_targ)
+        Q_targ = r + (0.95 * QV_targ)
         cg = self.cguard(st_rep, a_rep, sn_rep)
-        Q_targ *= cg * torch.gt(cg, 0.1).float()
+        
+        Q_targ *= cg * torch.gt(cg, 0.9).float()
 
         l += mse(Q_val, Q_targ.detach())
 
         #Now estimate V(s,g) := max_a Q(s,a,g)
         Q_val = Q_val.reshape((bs,N,1))
         maxQ = Q_val.max(dim=1).values.detach()
+
+        policy_target = a_rep.reshape((bs,N,2))[torch.arange(128), Q_val.argmax(dim=1).squeeze(-1), :]
+        policy = self.pvn.policy(st, sg)
+        l += mse(policy, policy_target.detach())
 
         V = self.pvn.value(st,sg) #estimate at k
         l += mse(V, maxQ)
@@ -402,10 +428,17 @@ if __name__ == "__main__":
             print(j, sum(loss_lst)/len(loss_lst))
             loss_lst = []
 
-            vals, s0, sg, opt_s = plan.eval_value(sk[0:1].cuda())
+            vals, s0, sg, opt_s, policy = plan.eval_value(sk[0:1].cuda())
             plt.scatter(s0[:,0], s0[:,1], c=vals, cmap='inferno')
             plt.savefig('results_val/vals.png')
             plt.clf()
+
+            policy = torch.clamp(policy, -0.05, 0.05)
+
+            plt.quiver(s0[:,0], s0[:,1], policy[:,0], policy[:,1])
+            plt.savefig('results_val/policy.png')
+            plt.clf()
+
             print('v min max', vals.min(), vals.max())        
             print('sg, opt_s', sg, opt_s)
 

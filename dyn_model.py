@@ -37,6 +37,7 @@ class DynVAE(nn.Module):
         self.enc = nn.Sequential(nn.Linear(512*4, 1024), nn.Dropout(0.0), nn.LeakyReLU(), nn.Linear(1024,1024), nn.Dropout(0.0), nn.LeakyReLU(), nn.Linear(1024, 64*2), nn.Dropout(0.0))
         self.dec = nn.Sequential(nn.Linear(64+512*4, 1024), nn.Dropout(0.0), nn.LeakyReLU(), nn.Linear(1024,1024), nn.Dropout(0.0), nn.LeakyReLU(), nn.Linear(1024, 6*2))
 
+
     def forward(self,sl,al,sn=None):
 
         bs = sl.shape[0]
@@ -89,6 +90,8 @@ def train_dynamics(S,A):
     net = DynVAE().cuda()
     opt = torch.optim.Adam(net.parameters(), lr = 0.0001)
 
+    score_net = torch.load('contrastive.pt')
+
     for j in range(0, 200000): 
         k = 3
         st, a = sample_batch(None, A, S, None, 128, k)
@@ -99,8 +102,21 @@ def train_dynamics(S,A):
 
         loss = net(sl, al, sn)[0]
 
+        #also take sl, random-al, get spred.  Then try to maximize metric-score.  
+        a_rand = torch.clamp(torch.randn_like(al)*0.1, -0.2, 0.2)
+        spred = net(sl, a_rand)
+
+        #test if contrastive model ever rejects a sample.  
+        score_logit, score = score_net.forward_enc(sl, a_rand, spred, 1)
+
+        #loss += (-1.0*score_logit * score.lt(0.1).float()).mean() * 0.01
+        #loss += -1.0*score.mean()
+
         if j % 500 == 0:
             print(j, loss)
+            print('score-min-mean-max', score.min(), score.mean(), score.max())
+            am = score.argmin()
+            print('argmin', sl[am], a_rand[am], spred[am])
 
         loss.backward()
         opt.step()
@@ -116,6 +132,8 @@ def train_dynamics(S,A):
             print(net(torch.Tensor([[0.4,0.3]]).cuda(), torch.Tensor([[0.1,0.0]]).cuda(), torch.Tensor([[0.5,0.3]]).cuda()))
             print("High")
             print(net(torch.Tensor([[0.45,0.2]]).cuda(), torch.Tensor([[0.1,0.0]]).cuda(), torch.Tensor([[0.55,0.2]]).cuda()))
+            print("High")
+            print(net(torch.Tensor([[0.49,0.2]]).cuda(), torch.Tensor([[0.2,0.0]]).cuda(), torch.Tensor([[0.5,0.2]]).cuda()))
 
         if j % 5000 == 0:
             torch.save(net, 'dyn.pt')

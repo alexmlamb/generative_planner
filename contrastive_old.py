@@ -70,6 +70,15 @@ class Contrastive(nn.Module):
         s_pred = self.net_forward(torch.cat([s, self.gauss_feat(a), kfeat], dim=1))
         return s_pred
 
+    def self_score(self, s, s_n):
+        k = 1
+        kfeat = self.kemb(torch.Tensor([k]*s.shape[0]).long().cuda())
+
+        s_enc = self.net_metric(torch.cat([self.gauss_feat(s), kfeat],dim=1))
+        s_n_enc = self.net_metric(torch.cat([self.gauss_feat(s_n), kfeat],dim=1))
+
+        return self.forward_score(s_enc, s_n_enc)
+
     def forward_enc(self, s, a, s_n, k):
 
         kfeat = self.kemb(torch.Tensor([k]*s.shape[0]).long().cuda())
@@ -150,6 +159,9 @@ class Contrastive(nn.Module):
 
         s_pos = s_seq[k:]
         s_neg = s_neg[k:] #not needed, just to make sizes match   
+
+        if random.uniform(0,1) < 0.5:
+            s_neg += torch.randn_like(s_neg)*0.1
 
         s_last_neg = s_last * 1.0
 
