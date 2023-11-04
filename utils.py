@@ -51,3 +51,41 @@ def sample_batch(X, A, ast, est, bs, k):
     return xt, alst#xtn, xtk, klst, alst, astate, estate
 
 
+# --------------------------------------------------
+
+
+from torch.utils.data import Dataset, DataLoader
+import torch
+import numpy as np
+import random
+import pickle
+
+class CustomDataset(Dataset):
+    """Face Landmarks dataset."""
+    def __init__(self):
+
+        self.dataset = pickle.load(open('data/dataset.p', 'rb'))
+        self.slen = 3
+        self.n = self.dataset['A'].shape[0]
+
+    def __len__(self):
+        return self.n-self.slen-2
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        r_ind = random.randint(0, self.n-self.slen-2)
+
+        s_seq = torch.Tensor(self.dataset['ast'][idx:idx+self.slen])
+        a_seq = torch.Tensor(self.dataset['A'][idx:idx+self.slen])
+        s_neg = torch.Tensor(self.dataset['ast'][r_ind:r_ind+self.slen])
+
+        return s_seq, a_seq, s_neg
+
+if __name__ == "__main__":
+    data = CustomDataset()
+    loader = DataLoader(data, batch_size=int(256), num_workers=2)
+    for i, (sample_batched) in enumerate(loader):
+        x, y, z = sample_batched
+        print('done')

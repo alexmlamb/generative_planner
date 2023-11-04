@@ -7,7 +7,9 @@ import numpy as np
 
 '''
 Idea: 
-    -Get tuples of s[t], a[t], s[t+1] and train AE with gaussian NLL.  Off-manifold NLL (wall-crossing) should be very bad, compared to normal transitions.  Do we need VAE on bottleneck?  Probably yes in concept to prevent memorizing.  
+    -Get tuples of s[t], a[t], s[t+1] and train AE with gaussian NLL.  
+    Off-manifold NLL (wall-crossing) should be very bad, compared to normal transitions.  
+    Do we need VAE on bottleneck?  Probably yes in concept to prevent memorizing.  
 
     -Study how NLL changes around the discrete peaks.  
 
@@ -59,8 +61,8 @@ class DynVAE(nn.Module):
 
         h = self.enc(gauss)
 
-        h_mu = h[:,:64]
-        h_std = torch.exp(h[:,64:])
+        h_mu = h[:, :64]
+        h_std = torch.exp(h[:, 64:])
 
         mu_prior = torch.zeros_like(h_mu)
         std_prior = torch.ones_like(h_std)
@@ -70,18 +72,18 @@ class DynVAE(nn.Module):
 
         h = posterior.rsample()
 
-        h = torch.cat([h,gauss],dim=1)
+        h = torch.cat([h, gauss], dim=1)
 
         out = self.dec(h)
 
         #loss = torch.abs(out - inp.detach()).mean()
 
-        mu = out[:,:6]
-        std = torch.exp(out[:,6:])
+        mu = out[:, :6]
+        std = torch.exp(out[:, 6:])
 
         if sn is not None:
             log_loss = torch.log(std * 2.5066) + 0.5 * (mu - targ.detach())**2 / std**2
-            return log_loss.mean() + kl_loss * 0.01, log_loss.mean().item(), mu.round(decimals=3)
+            return log_loss.mean() + kl_loss * 0.01, log_loss.mean().item(), mu
         else:
             return mu[:,-2:]
 

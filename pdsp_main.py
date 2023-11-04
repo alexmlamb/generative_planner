@@ -56,9 +56,9 @@ class StochasticPolicy(nn.Module):
 
     def value(self, s, a, sg):
         bs = s.shape[0]
-        inp = torch.cat([s,a,sg],dim=1)
+        inp = torch.cat([s, a, sg], dim=1)
         inp_flat = inp.reshape((inp.shape[0]*inp.shape[1]))
-        feat = self.gauss_feat(inp_flat).reshape((bs,-1))
+        feat = self.gauss_feat(inp_flat).reshape((bs, -1))
         h = self.value_net(feat)
         return h
 
@@ -125,12 +125,12 @@ class Planner(nn.Module):
 
         self.lfn = nn.MSELoss(reduction='none')
 
-    def makefeat(self,st,stk):
+    def makefeat(self, st, stk):
 
         bs = st.shape[0]
-        inp = torch.cat([st,stk],dim=1)
+        inp = torch.cat([st, stk], dim=1)
         inp_flat = inp.reshape((inp.shape[0]*inp.shape[1]))
-        feat = self.gauss_feat(inp_flat).reshape((bs,-1))
+        feat = self.gauss_feat(inp_flat).reshape((bs, -1))
 
         return feat
 
@@ -143,23 +143,23 @@ class Planner(nn.Module):
     def eval_value(self, sg):
         #sg is (1x2)
 
-        X,Y = torch.meshgrid(torch.arange(0.0,1.0,0.03), torch.arange(0.0,1.0,0.03), indexing='ij')
+        X,Y = torch.meshgrid(torch.arange(0.0, 1.0, 0.03), torch.arange(0.0, 1.0, 0.03), indexing='ij')
         s0 = torch.cat([X.unsqueeze(-1), Y.unsqueeze(-1)], dim=2).reshape((X.shape[0]*X.shape[1], 2)).cuda()
 
         #s0 = torch.rand((2048,2)).cuda()
         s0 = torch.cat([s0, sg], dim=0)
-        sg = sg.repeat(s0.shape[0],1)
+        sg = sg.repeat(s0.shape[0], 1)
 
         a0 = s0*0.0
 
-        vals = self.pvn.value(s0,a0,sg)
+        vals = self.pvn.value(s0, a0, sg)
 
         opt_val = vals.argmax(dim=0)
         opt_s = s0[opt_val]
 
         k = torch.Tensor([0]*s0.shape[0]).long().cuda()
         kemb = self.koptflag(k)
-        a = self.pvn.mode(torch.cat([self.makefeat(s0,sg), kemb], dim=1))
+        a = self.pvn.mode(torch.cat([self.makefeat(s0, sg), kemb], dim=1))
 
         return vals.cpu().data, s0.cpu().data, sg[0:1].cpu().data, opt_s.cpu().data, a.cpu().data
 
@@ -174,11 +174,11 @@ class Planner(nn.Module):
         T, bs, ns = slast.shape
         _, _, na = alst.shape
 
-        sg = sg.unsqueeze(0).repeat(T,1,1).reshape((T*bs,-1))
+        sg = sg.unsqueeze(0).repeat(T, 1, 1).reshape((T*bs, -1))
 
-        slast = slast.reshape((T*bs,-1))
-        snext = snext.reshape((T*bs,-1))
-        alst = alst.reshape((T*bs,-1))
+        slast = slast.reshape((T*bs, -1))
+        snext = snext.reshape((T*bs, -1))
+        alst = alst.reshape((T*bs, -1))
 
         c_dyn_score = self.score.forward_enc(slast, alst, snext, 1)[1]
         c_dyn_score = torch.clamp(c_dyn_score, 0.0, 0.9)/0.9
@@ -198,9 +198,9 @@ class Planner(nn.Module):
         eval_score += self.score.forward_enc(slast, alst, sg, 2)[1] #michael henaff, yann lecun.  Uncertainty-based penalization of model-based RL.  
         #curiosity driven exploration
 
-        c_dyn_score = c_dyn_score.reshape((T,bs))
-        train_score = train_score.reshape((T,bs))
-        eval_score = eval_score.reshape((T,bs))
+        c_dyn_score = c_dyn_score.reshape((T, bs))
+        train_score = train_score.reshape((T, bs))
+        eval_score = eval_score.reshape((T, bs))
 
         #val_est = val_est.mean(dim=1)
         #val_est = val_est.reshape((T,bs))
@@ -246,7 +246,7 @@ class Planner(nn.Module):
 
         return slst, alst
 
-    def multistep(self,s0,a0,sg,sg_pre,ktr,dyn):
+    def multistep(self, s0, a0, sg, sg_pre, ktr, dyn):
 
         '''
             Compute first action under net, and randomly.  
@@ -263,7 +263,7 @@ class Planner(nn.Module):
         kemb = self.koptflag(k)
 
         bs = s0.shape[0]
-        if True and ktr > 2 and random.uniform(0,1) < 0.5:
+        if True and ktr > 2 and random.uniform(0, 1) < 0.5:
             sg_targ = sg_pre
         else:
             sg_targ = sg
@@ -374,7 +374,7 @@ class Planner(nn.Module):
 
     def onestep_loss(self, st, at, stk):
 
-        feat = self.makefeat(st,stk)
+        feat = self.makefeat(st, stk)
 
         k = torch.Tensor([0]*st.shape[0]).long().cuda()
         kemb = self.koptflag(k)
@@ -397,15 +397,15 @@ class Planner(nn.Module):
 
         return l
 
-    def loss(self,st,at,stk):
+    def loss(self,st, at, stk):
         bs = st.shape[0]
 
-        feat = self.makefeat(st,stk)
+        feat = self.makefeat(st, stk)
 
         k = torch.Tensor([1]*st.shape[0]).long().cuda()
         kemb = self.koptflag(k)
 
-        a0_pred = self.pvn.mode(torch.cat([feat,kemb],dim=1))
+        a0_pred = self.pvn.mode(torch.cat([feat, kemb], dim=1))
 
         l = self.lfn(a0_pred, at.detach()).mean()
 
@@ -445,7 +445,7 @@ if __name__ == "__main__":
     score_approx_lst = []
     splan = None
 
-    for j in range(0,2*300000):
+    for j in range(0, 2*300000):
 
         datak = 32
         st, a = sample_batch(X, A, ast, est, 128, datak) #bs x pos x 2
@@ -454,16 +454,16 @@ if __name__ == "__main__":
 
         if ktr == 1:
             #1-step problem
-            s0 = st[:,0]
-            sk = st[:,1]
-            a0 = a[:,0]
-            l,a0pred, _, plan_score, _ = plan.loss(s0,a0,sk)
+            s0 = st[:, 0]
+            sk = st[:, 1]
+            a0 = a[:, 0]
+            l, a0pred, _, plan_score, _ = plan.loss(s0, a0, sk)
         else:
             #t0 = time.time()
-            s0 = st[:,0]
+            s0 = st[:, 0]
             idx = torch.randperm(s0.shape[0])
-            sk = st[:,-1][idx]
-            sk_pre = st[:,-2][idx]
+            sk = st[:, -1][idx]
+            sk_pre = st[:, -2][idx]
 
 
             #arand = torch.clamp(torch.randn_like(s0)*0.1, -0.2,0.2)

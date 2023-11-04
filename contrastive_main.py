@@ -48,29 +48,26 @@ import random
 import torch
 import torch.nn as nn
 import pickle
-
+import numpy as np
 ctype = 'v1'
 if ctype == 'v1':
     from contrastive_old import Contrastive
 elif ctype == 'v2':
     from contrastive import Contrastive
 import time
-
+from utils import CustomDataset
+from torch.utils.data import DataLoader
 score_net = Contrastive().cuda()
-
 opt = torch.optim.Adam(list(score_net.parameters()), lr=0.0001)
 
 if __name__ == "__main__":
 
-    import time
-    t0 = time.time()
-
     dataset = pickle.load(open('data/dataset.p', 'rb'))
-    n = dataset['X'].shape[0]
+    n = dataset['A'].shape[0] #dataset['X'].shape[0]
     slen = 3
     bs = 256
-    print('Num samples', dataset['X'].shape[0])       
-    assert len(dataset['X'].shape) == 4
+    print('Num samples', n)
+    #assert len(dataset['X'].shape) == 4
     assert len(dataset['A'].shape) == 2
     action_dim = dataset['A'].shape[1]
 
@@ -82,69 +79,144 @@ if __name__ == "__main__":
  
     contrastive_loss = []
 
-    for j in range(0,400000):
+    def transform(data):
+        data = torch.moveaxis(data, 0, 1).to('cuda')
+        return data
 
-        s_seq, a_seq, s_neg = [], [], []
-        for i in range(bs):
-            k_ind = random.randint(0,n-slen-2)
-            r_ind = random.randint(0,n-slen-2)
-            s_seq.append(torch.Tensor(S[k_ind : k_ind + slen]).cuda().unsqueeze(1))
-            a_seq.append(torch.Tensor(A[k_ind : k_ind + slen]).cuda().unsqueeze(1))
-            s_neg.append(torch.Tensor(S[r_ind : r_ind + slen]).cuda().unsqueeze(1))
+    # -----------------------------------------------------------------
+    for epoch in range(200):
+        t0 = time.time()
+        data = CustomDataset()
+        loader = DataLoader(data, batch_size=int(256), num_workers=0)
+        for i, (sample_batched) in enumerate(loader):
+            s_seq, a_seq, s_neg = sample_batched
+            s_seq = transform(s_seq)
+            a_seq = transform(a_seq)
+            s_neg = transform(s_neg)
 
-        s_seq = torch.cat(s_seq,dim=1)
-        a_seq = torch.cat(a_seq,dim=1)
-        s_neg = torch.cat(s_neg,dim=1)
+            loss = 0.0
+            closs = score_net.loss(s_seq, a_seq, s_neg)
+            contrastive_loss.append(closs.item())
 
-        loss = 0.0
- 
-   
-        closs = score_net.loss(s_seq, a_seq, s_neg)
-        contrastive_loss.append(closs.item())
+            loss += closs
 
-        loss += closs
+            # loss += score_net.forward_loss(s_seq, a_seq)
+            # loss += score_net.probe_loss(s_seq)
 
-        #loss += score_net.forward_loss(s_seq, a_seq)
-        #loss += score_net.probe_loss(s_seq)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
 
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
+        print("epoch:", epoch)
+        print('time spent:', time.time() - t0)
+        print('loss:', sum(contrastive_loss) / len(contrastive_loss))
 
-        if j % 500 == 0:
-            print('time', time.time() - t0)
-            t0 = time.time()
-            print('loss', j, sum(contrastive_loss)/len(contrastive_loss))
+        contrastive_loss = []
 
-            contrastive_loss = []
+        if ctype == 'v2':
+            test_neg1 = torch.Tensor(
+                [[0.45, 0.2, 0.2, 0.0], [0.65, 0.2, 0.07, 0.0], [0.72, 0.2, 0.05, 0.0], [0.77, 0.2, 0.05, 0.0]]).cuda()
+            test_neg2 = torch.Tensor(
+                [[0.45, 0.2, 0.2, 0.0], [0.65, 0.2, 0.0, 0.0], [0.65, 0.2, 0.05, 0.0], [0.7, 0.2, 0.0, 0.0]]).cuda()
 
+            test_pos1 = torch.Tensor(
+                [[0.15, 0.2, 0.1, 0.0], [0.25, 0.2, 0.0, 0.0], [0.25, 0.2, 0.00, 0.0], [0.25, 0.2, 0.0, 0.0]]).cuda()
+            test_pos2 = torch.Tensor(
+                [[0.55, 0.2, 0.1, 0.0], [0.65, 0.2, 0.0, 0.0], [0.65, 0.2, 0.00, 0.0], [0.65, 0.2, 0.0, 0.0]]).cuda()
 
-        if ctype=='v2' and j % 500 == 0:
-            test_neg1 = torch.Tensor([[0.45, 0.2, 0.2, 0.0], [0.65, 0.2, 0.07, 0.0], [0.72, 0.2, 0.05, 0.0], [0.77, 0.2, 0.05, 0.0]]).cuda()
-            test_neg2 = torch.Tensor([[0.45, 0.2, 0.2, 0.0], [0.65, 0.2, 0.0, 0.0], [0.65, 0.2, 0.05, 0.0], [0.7, 0.2, 0.0, 0.0]]).cuda()
+            print('neg-cross1', score_net.forward_enc(test_neg1[:, 0:2], test_neg1[:, 2:4]))
+            print('neg-cross2', score_net.forward_enc(test_neg2[:, 0:2], test_neg2[:, 2:4]))
 
-            test_pos1 = torch.Tensor([[0.15, 0.2, 0.1, 0.0], [0.25, 0.2, 0.0, 0.0], [0.25, 0.2, 0.00, 0.0], [0.25, 0.2, 0.0, 0.0]]).cuda()
-            test_pos2 = torch.Tensor([[0.55, 0.2, 0.1, 0.0], [0.65, 0.2, 0.0, 0.0], [0.65, 0.2, 0.00, 0.0], [0.65, 0.2, 0.0, 0.0]]).cuda()
+            print('pos-cross1', score_net.forward_enc(test_pos1[:, 0:2], test_pos1[:, 2:4]))
+            print('pos-cross2', score_net.forward_enc(test_pos2[:, 0:2], test_pos2[:, 2:4]))
+            # print('pos-cross', score_net.forward_enc(test_pos[:,0:2], test_pos[:,2:4], test_pos[:,4:6])[1])
+            # print('err-cross', score_net.forward_enc(test_err[:,0:2], test_err[:,2:4], test_err[:,4:6])[1])
 
-            print('neg-cross1', score_net.forward_enc(test_neg1[:,0:2],test_neg1[:,2:4]))
-            print('neg-cross2', score_net.forward_enc(test_neg2[:,0:2],test_neg2[:,2:4]))
+        if ctype == 'v1':
+            test_neg = torch.Tensor(
+                [[0.45, 0.2, 0.2, 0.0, 0.65, 0.2], [0.45, 0.2, 0.07, 0.0, 0.52, 0.2], [0.45, 0.2, 0.06, 0.0, 0.51, 0.2],
+                 [0.45, 0.2, 0.1, 0.0, 0.55, 0.2], [0.45, 0.2, 0.15, 0.0, 0.52, 0.2]]).cuda()
 
-            print('pos-cross1', score_net.forward_enc(test_pos1[:,0:2],test_pos1[:,2:4]))
-            print('pos-cross2', score_net.forward_enc(test_pos2[:,0:2],test_pos2[:,2:4]))
-            #print('pos-cross', score_net.forward_enc(test_pos[:,0:2], test_pos[:,2:4], test_pos[:,4:6])[1])
-            #print('err-cross', score_net.forward_enc(test_err[:,0:2], test_err[:,2:4], test_err[:,4:6])[1])
+            test_pos = torch.Tensor([[0.45, 0.2, 0.2, 0.0, 0.49, 0.2], [0.48, 0.1, 0.1, 0.0, 0.49, 0.1],
+                                     [0.1, 0.1, 0.1, 0.0, 0.2, 0.1]]).cuda()
 
-        if ctype=='v1' and j % 500 == 0:
-            test_neg = torch.Tensor([[0.45, 0.2, 0.2, 0.0, 0.65, 0.2], [0.45, 0.2, 0.07, 0.0, 0.52, 0.2], [0.45, 0.2, 0.06, 0.0, 0.51, 0.2], [0.45, 0.2, 0.1, 0.0, 0.55, 0.2], [0.45, 0.2, 0.15, 0.0, 0.52, 0.2]]).cuda()
+            test_err = torch.Tensor(
+                [[0.2, 0.2, 0.0, 0.0, 0.22, 0.2], [0.5, 0.5, 0.2, 0.0, 0.71, 0.5], [0.1, 0.1, 0.05, 0.0, 0.2, 0.1],
+                 [0.1, 0.1, 0.2, 0.0, 0.4, 0.1]]).cuda()
 
-            test_pos = torch.Tensor([[0.45, 0.2, 0.2, 0.0, 0.49, 0.2], [0.48, 0.1, 0.1, 0.0, 0.49, 0.1], [0.1, 0.1, 0.1, 0.0, 0.2, 0.1]]).cuda()
-
-            test_err = torch.Tensor([[0.2, 0.2, 0.0, 0.0, 0.22, 0.2], [0.5, 0.5, 0.2, 0.0, 0.71, 0.5], [0.1, 0.1, 0.05, 0.0, 0.2, 0.1], [0.1, 0.1, 0.2, 0.0, 0.4, 0.1]]).cuda()
-
-            print('neg-cross', score_net.forward_enc(test_neg[:,0:2], test_neg[:,2:4], test_neg[:,4:6],1)[1])
-            print('pos-cross', score_net.forward_enc(test_pos[:,0:2], test_pos[:,2:4], test_pos[:,4:6],1)[1])
-            print('err-cross', score_net.forward_enc(test_err[:,0:2], test_err[:,2:4], test_err[:,4:6],1)[1])
+            print('neg-cross', score_net.forward_enc(test_neg[:, 0:2], test_neg[:, 2:4], test_neg[:, 4:6], 1)[1])
+            print('pos-cross', score_net.forward_enc(test_pos[:, 0:2], test_pos[:, 2:4], test_pos[:, 4:6], 1)[1])
+            print('err-cross', score_net.forward_enc(test_err[:, 0:2], test_err[:, 2:4], test_err[:, 4:6], 1)[1])
 
             torch.save(score_net, 'contrastive.pt')
 
+
+    # ------------------------
+    #
+    # for j in range(0, 400000):
+    #
+    #     s_seq, a_seq, s_neg = [], [], []
+    #     for i in range(bs):
+    #         k_ind = random.randint(0, n-slen-2)
+    #         r_ind = random.randint(0, n-slen-2)
+    #         s_seq.append(torch.Tensor(S[k_ind : k_ind + slen]).cuda().unsqueeze(1))
+    #         a_seq.append(torch.Tensor(A[k_ind : k_ind + slen]).cuda().unsqueeze(1))
+    #         s_neg.append(torch.Tensor(S[r_ind : r_ind + slen]).cuda().unsqueeze(1))
+    #
+    #
+    #     s_seq = torch.cat(s_seq, dim=1)  # (3,256,2) --> (seq len, batch, feature-dim)
+    #     a_seq = torch.cat(a_seq, dim=1)
+    #     s_neg = torch.cat(s_neg, dim=1)
+    #
+    #     loss = 0.0
+    #
+    #
+    #     closs = score_net.loss(s_seq, a_seq, s_neg)
+    #     contrastive_loss.append(closs.item())
+    #
+    #     loss += closs
+    #
+    #     #loss += score_net.forward_loss(s_seq, a_seq)
+    #     #loss += score_net.probe_loss(s_seq)
+    #
+    #     opt.zero_grad()
+    #     loss.backward()
+    #     opt.step()
+    #
+    #     if j % 5000 == 0:
+    #         print('time', time.time() - t0)
+    #         t0 = time.time()
+    #         print('loss', j, sum(contrastive_loss)/len(contrastive_loss))
+    #
+    #         contrastive_loss = []
+    #
+    #
+    #     if ctype == 'v2' and j % 5000 == 0:
+    #         test_neg1 = torch.Tensor([[0.45, 0.2, 0.2, 0.0], [0.65, 0.2, 0.07, 0.0], [0.72, 0.2, 0.05, 0.0], [0.77, 0.2, 0.05, 0.0]]).cuda()
+    #         test_neg2 = torch.Tensor([[0.45, 0.2, 0.2, 0.0], [0.65, 0.2, 0.0, 0.0], [0.65, 0.2, 0.05, 0.0], [0.7, 0.2, 0.0, 0.0]]).cuda()
+    #
+    #         test_pos1 = torch.Tensor([[0.15, 0.2, 0.1, 0.0], [0.25, 0.2, 0.0, 0.0], [0.25, 0.2, 0.00, 0.0], [0.25, 0.2, 0.0, 0.0]]).cuda()
+    #         test_pos2 = torch.Tensor([[0.55, 0.2, 0.1, 0.0], [0.65, 0.2, 0.0, 0.0], [0.65, 0.2, 0.00, 0.0], [0.65, 0.2, 0.0, 0.0]]).cuda()
+    #
+    #         print('neg-cross1', score_net.forward_enc(test_neg1[:,0:2],test_neg1[:,2:4]))
+    #         print('neg-cross2', score_net.forward_enc(test_neg2[:,0:2],test_neg2[:,2:4]))
+    #
+    #         print('pos-cross1', score_net.forward_enc(test_pos1[:,0:2],test_pos1[:,2:4]))
+    #         print('pos-cross2', score_net.forward_enc(test_pos2[:,0:2],test_pos2[:,2:4]))
+    #         #print('pos-cross', score_net.forward_enc(test_pos[:,0:2], test_pos[:,2:4], test_pos[:,4:6])[1])
+    #         #print('err-cross', score_net.forward_enc(test_err[:,0:2], test_err[:,2:4], test_err[:,4:6])[1])
+    #
+    #     if ctype == 'v1' and j % 5000 == 0:
+    #         test_neg = torch.Tensor([[0.45, 0.2, 0.2, 0.0, 0.65, 0.2], [0.45, 0.2, 0.07, 0.0, 0.52, 0.2], [0.45, 0.2, 0.06, 0.0, 0.51, 0.2], [0.45, 0.2, 0.1, 0.0, 0.55, 0.2], [0.45, 0.2, 0.15, 0.0, 0.52, 0.2]]).cuda()
+    #
+    #         test_pos = torch.Tensor([[0.45, 0.2, 0.2, 0.0, 0.49, 0.2], [0.48, 0.1, 0.1, 0.0, 0.49, 0.1], [0.1, 0.1, 0.1, 0.0, 0.2, 0.1]]).cuda()
+    #
+    #         test_err = torch.Tensor([[0.2, 0.2, 0.0, 0.0, 0.22, 0.2], [0.5, 0.5, 0.2, 0.0, 0.71, 0.5], [0.1, 0.1, 0.05, 0.0, 0.2, 0.1], [0.1, 0.1, 0.2, 0.0, 0.4, 0.1]]).cuda()
+    #
+    #         print('neg-cross', score_net.forward_enc(test_neg[:,0:2], test_neg[:,2:4], test_neg[:,4:6],1)[1])
+    #         print('pos-cross', score_net.forward_enc(test_pos[:,0:2], test_pos[:,2:4], test_pos[:,4:6],1)[1])
+    #         print('err-cross', score_net.forward_enc(test_err[:,0:2], test_err[:,2:4], test_err[:,4:6],1)[1])
+    #
+    #         torch.save(score_net, 'contrastive.pt')
+    #
 
