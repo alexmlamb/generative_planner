@@ -468,8 +468,8 @@ if __name__ == "__main__":
 
             s0_d = s0[0:1].repeat(128,1)
             sk_d = sk[0:1].repeat(128,1)
-
-            roll_s, _ = plan.simulate(s0_d, sk_d, sk_d, plan.dyn, 15, diverse=True)
+             
+            roll_s, _ = plan.simulate(s0_d, sk_d, sk_d, plan.dyn, 15, diverse=True)              
             viz_plan_diverse(s0[0:1], sk[0:1], roll_s)
 
             print("Eval Value")
