@@ -38,5 +38,5 @@ if __name__ == "__main__":
 
     env = RoomPolygonObstacleEnv()
 
-    generate_data(env, 500000, 'dataset.p')
+    generate_data(env, 500000, 'data/dataset.p')
 

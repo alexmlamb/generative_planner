@@ -4,7 +4,8 @@ from utils import sample_batch
 import torch
 import torch.nn as nn
 import numpy as np
-
+import time
+from tqdm import tqdm
 '''
 Idea: 
     -Get tuples of s[t], a[t], s[t+1] and train AE with gaussian NLL.  
@@ -87,14 +88,15 @@ class DynVAE(nn.Module):
         else:
             return mu[:,-2:]
 
+
 def train_dynamics(S,A):
 
     net = DynVAE().cuda()
     opt = torch.optim.Adam(net.parameters(), lr = 0.0001)
 
     score_net = torch.load('contrastive.pt')
-
-    for j in range(0, 200000): 
+    t0 = time.time()
+    for j in tqdm(range(0, 200000)):
         k = 3
         st, a = sample_batch(None, A, S, None, 128, k)
 
@@ -115,6 +117,7 @@ def train_dynamics(S,A):
         #loss += -1.0*score.mean()
 
         if j % 500 == 0:
+            print('iter: {} time spent: {}'.format(j, time.time() - t0))
             print(j, loss)
             print('score-min-mean-max', score.min(), score.mean(), score.max())
             am = score.argmin()

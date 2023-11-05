@@ -1,4 +1,4 @@
-
+import os.path
 
 import torch
 import torch.nn as nn
@@ -391,6 +391,8 @@ if __name__ == "__main__":
     dataset = pickle.load(open('data/dataset.p', 'rb'))
     X, A, ast, est = dataset['X'], dataset['A'], dataset['ast'], dataset['est']
 
+    if not os.path.exists('results'):
+        os.mkdir('results')
 
     plan = Planner().cuda()
 
@@ -461,8 +463,8 @@ if __name__ == "__main__":
             print(ktr)
             print(s0[0],sk[0],a0pred[0])
 
-        if j % 2000 == 0 and ktr != 1:
-            viz_plan(s0,sk,splan,plan_score,0,'main')
+        if (j % 2000 == 0 and ktr != 1):
+            viz_plan(s0, sk, splan,plan_score,0,'main')
             worst_ind = plan_score.argmax(dim=0)[:bs//2].argmin()
             viz_plan(s0,sk,splan,plan_score,worst_ind,'worst')
 
