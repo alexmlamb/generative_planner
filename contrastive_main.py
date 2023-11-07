@@ -64,8 +64,8 @@ if __name__ == "__main__":
 
     dataset = pickle.load(open('data/dataset.p', 'rb'))
     n = dataset['A'].shape[0] #dataset['X'].shape[0]
-    slen = 3
-    bs = 256
+    slen = 3  # distance of neighbourhood
+    bs = 256  # batch size
     print('Num samples', n)
     #assert len(dataset['X'].shape) == 4
     assert len(dataset['A'].shape) == 2
@@ -86,8 +86,8 @@ if __name__ == "__main__":
     # -----------------------------------------------------------------
     for epoch in range(200):
         t0 = time.time()
-        data = CustomDataset()
-        loader = DataLoader(data, batch_size=int(256), num_workers=0)
+        data = CustomDataset(slen=slen)
+        loader = DataLoader(data, batch_size=int(bs), num_workers=4)
         for i, (sample_batched) in enumerate(loader):
             s_seq, a_seq, s_neg = sample_batched
             s_seq = transform(s_seq)

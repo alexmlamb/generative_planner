@@ -62,10 +62,10 @@ import pickle
 
 class CustomDataset(Dataset):
     """Face Landmarks dataset."""
-    def __init__(self):
+    def __init__(self, slen=3):
 
         self.dataset = pickle.load(open('data/dataset.p', 'rb'))
-        self.slen = 3
+        self.slen = slen
         self.n = self.dataset['A'].shape[0]
 
     def __len__(self):
